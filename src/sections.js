@@ -164,11 +164,10 @@ const SECTIONS = [
   // 3. Your Day
   // ───────────────────────────────────────────────
   {
-      {
     id: 'your-day',
     name: 'Your Day',
     description:
-      'Capture a detailed picture of the user\'s daily schedule, current eating patterns, and weekend habits. Helps the coach design a plan that fits into their real life rather than fighting against it.',
+      'Capture a detailed picture of the user's daily schedule, current eating patterns, and weekend habits. Helps the coach design a plan that fits into their real life rather than fighting against it.',
     fields: [
       {
         key: 'dailyRoutine',
@@ -197,7 +196,9 @@ const SECTIONS = [
     ],
     grouping: [['dailyRoutine'], ['currentDiet'], ['averageWeekend']],
     transitionHint: 'Transition from daily routine to health conditions',
-  },  // ───────────────────────────────────────────────
+  },
+
+  // ───────────────────────────────────────────────
   // 4. Health
   // ───────────────────────────────────────────────
   {
