@@ -1,0 +1,32 @@
+{
+  "name": "mealzy-bot",
+  "version": "2.0.0",
+  "description": "Premium Telegram onboarding chatbot with AI-powered conversations",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "chatbot",
+    "onboarding",
+    "groq",
+    "ai",
+    "nutrition",
+    "fitness"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "grammy": "^1.35.0",
+    "groq-sdk": "^0.15.0",
+    "dotenv": "^16.5.0",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
