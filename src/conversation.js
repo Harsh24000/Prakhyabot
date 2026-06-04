@@ -6,8 +6,19 @@ import {
   TRANSITION_PROMPT,
   WELCOME_PROMPT,
   PHOTO_PROMPT,
+  SMART_VALIDATION_PROMPT,
+  SMART_FOLLOW_UP_PROMPT,
+  SMART_INSIGHT_PROMPT,
 } from "./prompts.js";
-import { extractFields, generateResponse, generateTransition, generateWelcome } from "./llm.js";
+import {
+  extractFields,
+  generateResponse,
+  generateTransition,
+  generateWelcome,
+  detectSmartPatterns,
+  generateSmartFollowUp,
+  generateSmartInsight,
+} from "./llm.js";
 import {
   simulateTyping, calculateTypingDelay, splitMessages,
   fillTemplate, formatSummaryForTelegram, delay,
@@ -573,6 +584,62 @@ async function processAfterFieldUpdate(ctx, state, extracted = {}) {
 
   let response = currentMissing.length > 0 ? currentMissing[0].question : "Got it!";
   try { response = await generateResponse(responseCtx, "Generate your next message."); } catch {}
+
+  // SMART ENHANCEMENT: Detect patterns and add intelligent observations
+  if (Object.keys(extracted).length > 0) {
+    try {
+      const smartValidationCtx = fillTemplate(SMART_VALIDATION_PROMPT, {
+        userProfile: buildUserProfile(state),
+        currentAnswer: JSON.stringify(extracted),
+        sectionName: activeSection.name,
+      });
+
+      const smartPattern = await detectSmartPatterns(smartValidationCtx, "Analyze for contradictions and patterns.");
+
+      // If there's a smart observation, add it to the response
+      if (smartPattern.smartObservation && !response.includes(smartPattern.smartObservation)) {
+        response = response + "\n\n" + smartPattern.smartObservation;
+      }
+
+      // If there's a smart follow-up that's better than the default, use it
+      if (smartPattern.shouldAsk && currentMissing.length > 0) {
+        const smartFollowUpCtx = fillTemplate(SMART_FOLLOW_UP_PROMPT, {
+          userProfile: buildUserProfile(state),
+          currentAnswer: JSON.stringify(extracted),
+          sectionName: activeSection.name,
+          missingFields: buildFieldDefinitions(currentMissing),
+        });
+
+        try {
+          const smartQuestion = await generateSmartFollowUp(smartFollowUpCtx, "Generate a smart follow-up question.");
+          if (smartQuestion && smartQuestion.trim()) {
+            // Replace generic question with smart one
+            response = response.split("\n")[0] + "\n" + smartQuestion;
+          }
+        } catch {}
+      }
+    } catch (err) {
+      console.error("[Smart] Pattern detection failed:", err.message);
+      // Continue with regular response if smart analysis fails
+    }
+  }
+
+  // SMART ENHANCEMENT: Add a brief insight if relevant
+  if (Object.keys(extracted).length > 0 && Math.random() < 0.4) { // 40% chance to add insight (not every message)
+    try {
+      const insightCtx = fillTemplate(SMART_INSIGHT_PROMPT, {
+        userProfile: buildUserProfile(state),
+        currentAnswer: JSON.stringify(extracted),
+        sectionName: activeSection.name,
+      });
+
+      const insight = await generateSmartInsight(insightCtx, "Share a relevant fitness insight.");
+      if (insight && insight.trim() && !response.includes(insight)) {
+        // Add insight at the end
+        response = response + "\n" + insight;
+      }
+    } catch {}
+  }
 
   await sendBotMessage(ctx, state, response, getKeyboardForField(currentMissing[0]));
 }
