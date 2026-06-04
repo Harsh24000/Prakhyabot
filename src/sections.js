@@ -164,10 +164,10 @@ const SECTIONS = [
   // 3. Your Day
   // ───────────────────────────────────────────────
   {
+      {
     id: 'your-day',
     name: 'Your Day',
-    description:
-      'Capture a detailed picture of the user's daily schedule, current eating patterns, and weekend habits. Helps the coach design a plan that fits into their real life rather than fighting against it.',
+    description: 'Capture a detailed picture of the user daily schedule, current eating patterns, and weekend habits. Helps the coach design a plan that fits into their real life rather than fighting against it.',
     fields: [
       {
         key: 'dailyRoutine',
