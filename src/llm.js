@@ -127,3 +127,71 @@ export async function generateSummary(summaryPrompt, userData) {
     maxTokens: 2000,
   });
 }
+
+// ---------------------------------------------------------------------------
+// SMART functions — make the bot intelligent about contradictions & patterns
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect smart contradictions and patterns in user's data.
+ * Analyzes if user's goals match their stated behavior/willingness.
+ *
+ * @param {string} validationPrompt - The filled smart validation prompt.
+ * @param {string} context          - User data and current answer.
+ * @returns {Promise<{hasContradiction: boolean, contradiction: string|null, smartObservation: string|null, shouldAsk: string|null}>}
+ */
+export async function detectSmartPatterns(validationPrompt, context) {
+  const raw = await chat(validationPrompt, context, {
+    json: true,
+    temperature: 0.4, // lower temp for pattern detection
+    maxTokens: 400,
+  });
+
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      hasContradiction: parsed.hasContradiction ?? false,
+      contradiction: parsed.contradiction ?? null,
+      smartObservation: parsed.smartObservation ?? null,
+      shouldAsk: parsed.shouldAsk ?? null,
+    };
+  } catch (err) {
+    console.error("[LLM] Failed to parse smart validation JSON:", raw);
+    return {
+      hasContradiction: false,
+      contradiction: null,
+      smartObservation: null,
+      shouldAsk: null,
+    };
+  }
+}
+
+/**
+ * Generate a contextually smart follow-up question.
+ * Different from generic questions — this feels tailored to THIS user.
+ *
+ * @param {string} followUpPrompt - The filled smart follow-up prompt.
+ * @param {string} context       - User data and section context.
+ * @returns {Promise<string>} The smart follow-up question.
+ */
+export async function generateSmartFollowUp(followUpPrompt, context) {
+  return chat(followUpPrompt, context, {
+    temperature: 0.7,
+    maxTokens: 150,
+  });
+}
+
+/**
+ * Generate a brief, relevant fitness/nutrition insight.
+ * Makes the bot feel knowledgeable and shows it understands their situation.
+ *
+ * @param {string} insightPrompt - The filled smart insight prompt.
+ * @param {string} context       - User data and current answer.
+ * @returns {Promise<string>} The insight text (1 sentence).
+ */
+export async function generateSmartInsight(insightPrompt, context) {
+  return chat(insightPrompt, context, {
+    temperature: 0.6,
+    maxTokens: 150,
+  });
+}
