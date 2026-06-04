@@ -9,6 +9,10 @@ import {
   SMART_VALIDATION_PROMPT,
   SMART_FOLLOW_UP_PROMPT,
   SMART_INSIGHT_PROMPT,
+  SMART_DOMAIN_PROMPT,
+  SMART_REALITY_CHECK_PROMPT,
+  CONTEXT_AWARE_EXTRACTION_PROMPT,
+  SMART_ASK_PROMPT,
 } from "./prompts.js";
 import {
   extractFields,
@@ -18,6 +22,10 @@ import {
   detectSmartPatterns,
   generateSmartFollowUp,
   generateSmartInsight,
+  generateSmartDomainQuestion,
+  checkGoalRealism,
+  extractWithContext,
+  generateSmartAsk,
 } from "./llm.js";
 import {
   simulateTyping, calculateTypingDelay, splitMessages,
@@ -55,7 +63,7 @@ async function withLock(chatId, fn) {
 }
 
 // ---------------------------------------------------------------------------
-// Skip / refusal detection
+// SMART Intent Detection — Understand what users are REALLY doing
 // ---------------------------------------------------------------------------
 
 const SKIP_PHRASES = [
@@ -65,10 +73,55 @@ const SKIP_PHRASES = [
   "idk", "no idea", "not sure", "don't know", "dont know",
 ];
 
+const PLAYFULNESS_PHRASES = [
+  "guess", "lol", "haha", "😄", "😅", "😆", "just kidding", "jk", "nah kidding",
+  "you think", "try", "be smart", "figure it out", "make a guess",
+];
+
+const EVASION_PHRASES = [
+  "why", "why to", "why should", "is it necessary", "do i have to", "do i need to",
+  "why do i need", "what's the reason", "why would i", "why does it matter",
+];
+
+const HESITATION_PHRASES = [
+  "not sure", "kinda", "sort of", "maybe", "i guess", "kind of", "not really",
+  "probably", "possibly", "might be", "could be", "think so",
+];
+
 function isSkipIntent(message) {
   if (!message) return false;
   const lower = message.toLowerCase().trim();
   return SKIP_PHRASES.some(p => lower.includes(p));
+}
+
+/**
+ * Detect if user is being PLAYFUL (testing, joking, not refusing)
+ * Important: Playfulness ≠ evasion. They might give data after.
+ */
+function detectPlayfulness(message) {
+  if (!message) return false;
+  const lower = message.toLowerCase().trim();
+  return PLAYFULNESS_PHRASES.some(p => lower.includes(p));
+}
+
+/**
+ * Detect if user is EVADING (questioning why they should answer)
+ * Important: Address the resistance, don't repeat the question.
+ */
+function detectEvasion(message) {
+  if (!message) return false;
+  const lower = message.toLowerCase().trim();
+  return EVASION_PHRASES.some(p => lower.includes(p));
+}
+
+/**
+ * Detect if user is HESITANT (uncertain, not refusal)
+ * Important: Show confidence in why you need it.
+ */
+function detectHesitation(message) {
+  if (!message) return false;
+  const lower = message.toLowerCase().trim();
+  return HESITATION_PHRASES.some(p => lower.includes(p));
 }
 
 // Emoji reactions allowed by Telegram Bot API
@@ -566,26 +619,36 @@ async function processAfterFieldUpdate(ctx, state, extracted = {}) {
     }
   }
 
-  // Generate conversational response for remaining missing fields
+  // Generate SMART conversational response for remaining missing fields
   const activeSection = getCurrentSection(state);
   const currentMissing = getMissingFieldsInGroup(state);
-
-  const responseCtx = fillTemplate(RESPONSE_PROMPT, {
-    botName: BOT_NAME,
-    sectionName: activeSection.name,
-    sectionDescription: activeSection.description,
-    extractedFields: JSON.stringify(extracted),
-    missingFields: buildFieldDefinitions(currentMissing),
-    userProfile: buildUserProfile(state),
-    conversationHistory: buildConversationHistory(state),
-  });
 
   await simulateTyping(ctx, calculateTypingDelay("response"));
 
   let response = currentMissing.length > 0 ? currentMissing[0].question : "Got it!";
-  try { response = await generateResponse(responseCtx, "Generate your next message."); } catch {}
 
-  // SMART ENHANCEMENT: Detect patterns and add intelligent observations
+  // ════════════════════════════════════════════════════════════════════════
+  // TIER 1: Smart Response with Initial Reaction
+  // ════════════════════════════════════════════════════════════════════════
+  try {
+    const responseCtx = fillTemplate(RESPONSE_PROMPT, {
+      botName: BOT_NAME,
+      sectionName: activeSection.name,
+      sectionDescription: activeSection.description,
+      extractedFields: JSON.stringify(extracted),
+      missingFields: buildFieldDefinitions(currentMissing),
+      userProfile: buildUserProfile(state),
+      conversationHistory: buildConversationHistory(state),
+    });
+
+    response = await generateResponse(responseCtx, "Generate your next message.");
+  } catch (err) {
+    console.error("[Response] Generation failed:", err.message);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // TIER 2: Detect Patterns and Contradictions
+  // ════════════════════════════════════════════════════════════════════════
   if (Object.keys(extracted).length > 0) {
     try {
       const smartValidationCtx = fillTemplate(SMART_VALIDATION_PROMPT, {
@@ -596,36 +659,43 @@ async function processAfterFieldUpdate(ctx, state, extracted = {}) {
 
       const smartPattern = await detectSmartPatterns(smartValidationCtx, "Analyze for contradictions and patterns.");
 
-      // If there's a smart observation, add it to the response
       if (smartPattern.smartObservation && !response.includes(smartPattern.smartObservation)) {
         response = response + "\n\n" + smartPattern.smartObservation;
       }
-
-      // If there's a smart follow-up that's better than the default, use it
-      if (smartPattern.shouldAsk && currentMissing.length > 0) {
-        const smartFollowUpCtx = fillTemplate(SMART_FOLLOW_UP_PROMPT, {
-          userProfile: buildUserProfile(state),
-          currentAnswer: JSON.stringify(extracted),
-          sectionName: activeSection.name,
-          missingFields: buildFieldDefinitions(currentMissing),
-        });
-
-        try {
-          const smartQuestion = await generateSmartFollowUp(smartFollowUpCtx, "Generate a smart follow-up question.");
-          if (smartQuestion && smartQuestion.trim()) {
-            // Replace generic question with smart one
-            response = response.split("\n")[0] + "\n" + smartQuestion;
-          }
-        } catch {}
-      }
     } catch (err) {
       console.error("[Smart] Pattern detection failed:", err.message);
-      // Continue with regular response if smart analysis fails
     }
   }
 
-  // SMART ENHANCEMENT: Add a brief insight if relevant
-  if (Object.keys(extracted).length > 0 && Math.random() < 0.4) { // 40% chance to add insight (not every message)
+  // ════════════════════════════════════════════════════════════════════════
+  // TIER 3: Domain-Specific Smart Follow-Up (if still missing fields)
+  // ════════════════════════════════════════════════════════════════════════
+  if (currentMissing.length > 0 && Object.keys(extracted).length > 0) {
+    try {
+      const nextField = currentMissing[0];
+      const domainCtx = fillTemplate(SMART_DOMAIN_PROMPT, {
+        userProfile: buildUserProfile(state),
+        fieldName: nextField.key,
+        fieldDescription: nextField.question,
+        currentAnswer: JSON.stringify(extracted),
+      });
+
+      const smartQuestion = await generateSmartDomainQuestion(domainCtx, "Generate domain-specific smart follow-up.");
+      if (smartQuestion && smartQuestion.trim() && !response.includes(smartQuestion)) {
+        // Replace last line of response with smarter question
+        const lines = response.split("\n");
+        lines[lines.length - 1] = smartQuestion;
+        response = lines.join("\n");
+      }
+    } catch (err) {
+      console.error("[Domain] Question generation failed:", err.message);
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // TIER 4: Micro-Insights About Their Situation
+  // ════════════════════════════════════════════════════════════════════════
+  if (Object.keys(extracted).length > 0 && Math.random() < 0.45) { // 45% chance
     try {
       const insightCtx = fillTemplate(SMART_INSIGHT_PROMPT, {
         userProfile: buildUserProfile(state),
@@ -633,12 +703,34 @@ async function processAfterFieldUpdate(ctx, state, extracted = {}) {
         sectionName: activeSection.name,
       });
 
-      const insight = await generateSmartInsight(insightCtx, "Share a relevant fitness insight.");
-      if (insight && insight.trim() && !response.includes(insight)) {
-        // Add insight at the end
+      const insight = await generateSmartInsight(insightCtx, "Share relevant insight.");
+      if (insight && insight.trim() && !response.toLowerCase().includes(insight.toLowerCase())) {
         response = response + "\n" + insight;
       }
-    } catch {}
+    } catch (err) {
+      console.error("[Insight] Generation failed:", err.message);
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // TIER 5: Reality Check for Goals (if goal section)
+  // ════════════════════════════════════════════════════════════════════════
+  if (activeSection.id === "your-goals" && Object.keys(extracted).length > 0) {
+    try {
+      const goalRealism = fillTemplate(SMART_REALITY_CHECK_PROMPT, {
+        userProfile: buildUserProfile(state),
+        userGoal: JSON.stringify(extracted),
+        userSituation: buildUserProfile(state),
+        userWillingness: JSON.stringify(state.data), // What they've said they'll do
+      });
+
+      const realityCheck = await checkGoalRealism(goalRealism, "Evaluate goal vs situation.");
+      if (!realityCheck.isRealistic && realityCheck.smartQuestion) {
+        response = response + "\n\n" + realityCheck.smartQuestion;
+      }
+    } catch (err) {
+      console.error("[Reality] Check failed:", err.message);
+    }
   }
 
   await sendBotMessage(ctx, state, response, getKeyboardForField(currentMissing[0]));
@@ -751,6 +843,12 @@ export async function handleMessage(ctx) {
       return;
     }
 
+    // ── SMART Intent Detection ────────────────────────────────────────────
+    // Important: Playfulness and evasion are NOT refusals, handle differently
+    const isPlayful = detectPlayfulness(userMessage);
+    const isEvading = detectEvasion(userMessage);
+    const isHesitant = detectHesitation(userMessage);
+
     // ── Skip / refusal detection ───────────────────────────────────────────
     if (isSkipIntent(userMessage)) {
       const missingFields = getMissingFieldsInGroup(state);
@@ -773,6 +871,28 @@ export async function handleMessage(ctx) {
           "even a rough answer works, it doesn't have to be exact!"
         );
         return;
+      }
+    }
+
+    // ── Handle EVASION smartly (address the resistance, not the data) ──────
+    if (isEvading && !isPlayful) {
+      const missingFields = getMissingFieldsInGroup(state);
+      if (missingFields.length > 0) {
+        const field = missingFields[0];
+        let response = "";
+
+        if (field.key === "fullName") {
+          response = "honestly yeah, knowing your name helps me personalize your plan — promise it's not for no reason 🙏";
+        } else if (field.key.includes("Health") || field.key.includes("Condition")) {
+          response = "i get why you'd ask — but this one actually matters for your safety and results. helps me make sure your plan works for YOUR body";
+        } else {
+          response = "i hear you, but the better i know you, the better your plan. these details actually matter 👍";
+        }
+
+        await simulateTyping(ctx, 800);
+        await ctx.reply(response);
+        addToHistory(state, "Bot", response);
+        return; // Don't extract yet, let them respond to the reasoning
       }
     }
 
