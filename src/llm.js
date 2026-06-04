@@ -195,3 +195,87 @@ export async function generateSmartInsight(insightPrompt, context) {
     maxTokens: 150,
   });
 }
+
+/**
+ * Generate a domain-specific smart follow-up question.
+ * Different questions for fitness/nutrition/health/psychology domains.
+ *
+ * @param {string} domainPrompt - The filled domain-specific prompt.
+ * @param {string} context      - User situation and field context.
+ * @returns {Promise<string>} The smart follow-up question.
+ */
+export async function generateSmartDomainQuestion(domainPrompt, context) {
+  return chat(domainPrompt, context, {
+    temperature: 0.7,
+    maxTokens: 150,
+  });
+}
+
+/**
+ * Validate goals vs situation — catch unrealistic goals and contradictions.
+ *
+ * @param {string} realityCheckPrompt - The filled reality check prompt.
+ * @param {string} context            - User's goal, situation, willingness.
+ * @returns {Promise<{isRealistic: boolean, issue: string|null, smartQuestion: string|null}>}
+ */
+export async function checkGoalRealism(realityCheckPrompt, context) {
+  const raw = await chat(realityCheckPrompt, context, {
+    json: true,
+    temperature: 0.5,
+    maxTokens: 400,
+  });
+
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      isRealistic: parsed.isRealistic ?? true,
+      issue: parsed.issue ?? null,
+      smartQuestion: parsed.smartQuestion ?? null,
+    };
+  } catch (err) {
+    console.error("[LLM] Failed to parse reality check JSON:", raw);
+    return { isRealistic: true, issue: null, smartQuestion: null };
+  }
+}
+
+/**
+ * Extract data PLUS coaching context from user message.
+ * Gets not just fields, but intent and situation.
+ *
+ * @param {string} contextPrompt - The filled context extraction prompt.
+ * @param {string} message       - User message and profile.
+ * @returns {Promise<{extracted: object, coachingInsight: string, redFlag: string|null}>}
+ */
+export async function extractWithContext(contextPrompt, message) {
+  const raw = await chat(contextPrompt, message, {
+    json: true,
+    temperature: 0.4,
+    maxTokens: 400,
+  });
+
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      extracted: parsed.extracted ?? {},
+      coachingInsight: parsed.coachingInsight ?? "",
+      redFlag: parsed.redFlag ?? null,
+    };
+  } catch (err) {
+    console.error("[LLM] Failed to parse context extraction JSON:", raw);
+    return { extracted: {}, coachingInsight: "", redFlag: null };
+  }
+}
+
+/**
+ * Generate a smart ask that references user's specific situation.
+ *
+ * @param {string} smartAskPrompt - The filled smart ask prompt.
+ * @param {string} context        - User profile and what was extracted.
+ * @returns {Promise<string>} The smart ask message.
+ */
+export async function generateSmartAsk(smartAskPrompt, context) {
+  return chat(smartAskPrompt, context, {
+    temperature: 0.75,
+    maxTokens: 200,
+  });
+}
